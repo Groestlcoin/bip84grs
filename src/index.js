@@ -1,5 +1,5 @@
-const bjs = require('bitcoinjs-lib')
-    , b58 = require('bs58check')
+const bjs = require('groestlcoinjs-lib')
+    , b58 = require('bs58grscheck')
     , bip39 = require('bip39')
 
 const pub_types = [
@@ -42,7 +42,7 @@ fromSeed.prototype.getRootPublic = function () {
 }
 
 fromSeed.prototype.deriveAccount = function (index) {
-  let keypath = "m/84'/0'" + '/' + index + "'"
+  let keypath = "m/84'/17'" + '/' + index + "'"
   let masterPrv = this.isTestnet ?
                     vprv(bjs.bip32.fromSeed(this.seed, this.network).derivePath(keypath).toBase58()) :
                       zprv(bjs.bip32.fromSeed(this.seed, this.network).derivePath(keypath).toBase58())
