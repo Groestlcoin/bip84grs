@@ -1,63 +1,64 @@
 const bjs = require('groestlcoinjs-lib')
     , b58 = require('bs58grscheck')
     , bip39 = require('bip39')
-
-const pub_types = [
-  '04b2430c', // zprv
-  '04b24746', // zpub
-]
-
-// testnet
-const pub_types_testnet = [
-  '045f18bc', // vprv
-  '045f1cf6', // vpub
-]
+    , bitcoinPubTypes = { mainnet: { zprv: '04b2430c', zpub: '04b24746'}, testnet: { vprv: '045f18bc', vpub: '045f1cf6'} }
+    , bitcoinNetworks = { mainnet: bjs.networks.bitcoin, testnet: bjs.networks.testnet }
 
 /**
  * Constructor
  * Derive accounts from a seed.
  * @param {string} seed
- * @param {boolean} network
+ * @param {boolean} isTestnet
+ * @param {number} slip44
+ * @param {object} pubTypes
+ * @param {object} network
  */
-function fromSeed(seed, network) {
+function fromSeed(seed, isTestnet, slip44, pubTypes, network) {
   this.seed = bip39.mnemonicToSeedSync(seed)
-  this.isTestnet = network === true ? true : false
-  this.network = network === true ? bjs.networks.testnet : bjs.networks.bitcoin
+  this.isTestnet = isTestnet === true
+  this.slip44 = this.isTestnet ? 1 : slip44 ? slip44 : 17 // 0 is for Bitcoin and 1 is testnet for all coins
+  this.pubTypes = pubTypes || bitcoinPubTypes
+  this.network = network || this.isTestnet ? bitcoinNetworks.testnet : bitcoinNetworks.bitcoin
 }
 
-fromSeed.prototype.getRootPrivate = function () {
-  let masterPrv = this.isTestnet ?
-                    vprv(bjs.bip32.fromSeed(this.seed, this.network).toBase58()) :
-                      zprv(bjs.bip32.fromSeed(this.seed, this.network).toBase58())
+fromSeed.prototype.getRootPrivateKey = function () {
+  let prv = bjs.bip32.fromSeed(this.seed, this.network).toBase58()
+    , masterPrv = this.isTestnet ?
+                    vprv(prv, this.pubTypes.testnet.vprv) :
+                      zprv(prv, this.pubTypes.mainnet.zprv)
 
   return masterPrv
 }
 
-fromSeed.prototype.getRootPublic = function () {
-  let masterPub = this.isTestnet ?
-                    vpub(bjs.bip32.fromSeed(this.seed, this.network).neutered().toBase58()) :
-                      zpub(bjs.bip32.fromSeed(this.seed, this.network).neutered().toBase58())
+fromSeed.prototype.getRootPublicKey = function () {
+  let pub = bjs.bip32.fromSeed(this.seed, this.network).neutered().toBase58()
+    , masterPub = this.isTestnet ?
+                    vpub(pub, this.pubTypes.testnet.vpub) :
+                      zpub(pub, this.pubTypes.mainnet.zpub)
 
   return masterPub
 }
 
 fromSeed.prototype.deriveAccount = function (index) {
-  let keypath = "m/84'/17'" + '/' + index + "'"
-  let masterPrv = this.isTestnet ?
-                    vprv(bjs.bip32.fromSeed(this.seed, this.network).derivePath(keypath).toBase58()) :
-                      zprv(bjs.bip32.fromSeed(this.seed, this.network).derivePath(keypath).toBase58())
+  let keypath = "m/84'/" + this.slip44 + "'/" + index + "'"
+    , account = bjs.bip32.fromSeed(this.seed, this.network).derivePath(keypath).toBase58()
+    , masterPrv = this.isTestnet ?
+                    vprv(account, this.pubTypes.testnet.vprv) :
+                      zprv(account, this.pubTypes.mainnet.zprv)
 
   return masterPrv
 }
 
 /**
  * Constructor
- * Create key pairs from a private master key.
+ * Create key pairs from a private master key of mainnet and testnet.
  * @param {string} zprv/vprv
+ * @param {object} pubTypes
+ * @param {object} networks
  */
-function fromZPrv(zprv) {
-  this.network = undefined
-  this.isTestnet = undefined
+function fromZPrv(zprv, pubTypes, networks) {
+  this.pubTypes = pubTypes || bitcoinPubTypes
+  this.networks = networks || bitcoinNetworks
   this.zprv = this.toNode(zprv)
 }
 
@@ -67,65 +68,63 @@ fromZPrv.prototype.toNode = function (zprv) {
     , key = payload.slice(4)
     , buffer = undefined
 
-  if (!pub_types.includes(version.toString('hex')) && !pub_types_testnet.includes(version.toString('hex'))) {
+  if (!Object.values(this.pubTypes.mainnet).includes(version.toString('hex')) && !Object.values(this.pubTypes.testnet).includes(version.toString('hex'))) {
     throw new Error('prefix is not supported')
   }
 
-  if (pub_types.includes(version.toString('hex'))) {
-    buffer = Buffer.concat([Buffer.from('0488ade4','hex'), key]) // xprv
-
-    this.network = bjs.networks.bitcoin
+  if (Object.values(this.pubTypes.mainnet).includes(version.toString('hex'))) {
+    const buf = Buffer.allocUnsafe(4)
+    buf.writeInt32BE(this.networks.mainnet.bip32.private, 0)
+    buffer = Buffer.concat([buf, key]) // zprv
+    this.network = this.networks.mainnet
     this.isTestnet = false
   }
 
-  if (pub_types_testnet.includes(version.toString('hex'))) {
-    buffer = Buffer.concat([Buffer.from('04358394','hex'), key]) // tprv
-
-    this.network = bjs.networks.testnet
+  if (Object.values(this.pubTypes.testnet).includes(version.toString('hex'))) {
+    const buf = Buffer.allocUnsafe(4)
+    buf.writeInt32BE(this.networks.testnet.bip32.private, 0)
+    buffer = Buffer.concat([buf, key]) // vprv
+    this.network = this.networks.testnet
     this.isTestnet = true
   }
 
   return b58.encode(buffer)
 }
 
-fromZPrv.prototype.getAccountPrivate = function () {
-  let masterPrv = this.isTestnet ?
-                    vprv(bjs.bip32.fromBase58(this.zprv, this.network).toBase58()) :
-                      zprv(bjs.bip32.fromBase58(this.zprv, this.network).toBase58())
+fromZPrv.prototype.getAccountPrivateKey = function () {
+  let pub = bjs.bip32.fromBase58(this.zprv, this.network).toBase58()
+    , masterPrv = this.isTestnet ?
+                    vprv(pub, this.pubTypes.testnet.vprv) :
+                      zprv(pub, this.pubTypes.mainnet.zprv)
 
   return masterPrv
 }
 
-fromZPrv.prototype.getAccountPublic = function () {
-  let masterPub = this.isTestnet ?
-                    vpub(bjs.bip32.fromBase58(this.zprv, this.network).neutered().toBase58()) :
-                      zpub(bjs.bip32.fromBase58(this.zprv, this.network).neutered().toBase58())
+fromZPrv.prototype.getAccountPublicKey = function () {
+  let pub = bjs.bip32.fromBase58(this.zprv, this.network).neutered().toBase58()
+    , masterPub = this.isTestnet ?
+                    vpub(pub, this.pubTypes.testnet.vpub) :
+                      zpub(pub, this.pubTypes.mainnet.zpub)
 
   return masterPub
 }
 
 fromZPrv.prototype.getPrivateKey = function (index, isChange) {
-  isChange = isChange !== true ? false : true
-
-  let change = isChange !== true ? 0 : 1
+  let change = isChange === true ? 1 : 0
     , prvkey = bjs.bip32.fromBase58(this.zprv, this.network).derive(change).derive(index)
 
   return prvkey.toWIF()
 }
 
 fromZPrv.prototype.getPublicKey = function (index, isChange) {
-  isChange = isChange !== true ? false : true
-
-  let change = isChange !== true ? 0 : 1
+  let change = isChange === true ? 1 : 0
     , prvkey = bjs.bip32.fromBase58(this.zprv, this.network).derive(change).derive(index)
 
   return prvkey.publicKey.toString('hex')
 }
 
 fromZPrv.prototype.getAddress = function (index, isChange) {
-  isChange = isChange !== true ? false : true
-
-  let change = isChange !== true ? 0 : 1
+  let change = isChange === true ? 1 : 0
     , pubkey = bjs.bip32.fromBase58(this.zprv, this.network).derive(change).derive(index).publicKey
 
   const payment = bjs.payments.p2wpkh({
@@ -136,14 +135,23 @@ fromZPrv.prototype.getAddress = function (index, isChange) {
   return payment.address
 }
 
+fromZPrv.prototype.getKeypair = function (index, isChange) {
+  let change = isChange === true ? 1 : 0
+    , prvkey = bjs.bip32.fromBase58(this.zprv, this.network).derive(change).derive(index)
+
+  return prvkey
+}
+
 /**
  * Constructor
- * Create public keys and addresses from a public master key.
+ * Create public keys and addresses from a public master key of mainnet and testnet.
  * @param {string} zpub/vpub
+ * @param {object} pubTypes
+ * @param {object} networks
  */
-function fromZPub(zpub) {
-  this.network = undefined
-  this.isTestnet = undefined
+function fromZPub(zpub, pubTypes, networks) {
+  this.pubTypes = pubTypes || bitcoinPubTypes
+  this.networks = networks || bitcoinNetworks
   this.zpub = this.toNode(zpub)
 }
 
@@ -153,48 +161,47 @@ fromZPub.prototype.toNode = function (zpub) {
     , key = payload.slice(4)
     , buffer = undefined
 
-  if (!pub_types.includes(version.toString('hex')) && !pub_types_testnet.includes(version.toString('hex'))) {
+  if (!Object.values(this.pubTypes.mainnet).includes(version.toString('hex')) && !Object.values(this.pubTypes.testnet).includes(version.toString('hex'))) {
     throw new Error('prefix is not supported')
   }
 
-  if (pub_types.includes(version.toString('hex'))) {
-    buffer = Buffer.concat([Buffer.from('0488b21e','hex'), key]) // xpub
-
-    this.network = bjs.networks.bitcoin
+  if (Object.values(this.pubTypes.mainnet).includes(version.toString('hex'))) {
+    const buf = Buffer.allocUnsafe(4)
+    buf.writeInt32BE(this.networks.mainnet.bip32.public, 0)
+    buffer = Buffer.concat([buf, key]) // zpub
+    this.network = this.networks.mainnet
     this.isTestnet = false
   }
 
-  if (pub_types_testnet.includes(version.toString('hex'))) {
-    buffer = Buffer.concat([Buffer.from('043587cf','hex'), key]) // tpub
-
-    this.network = bjs.networks.testnet
+  if (Object.values(this.pubTypes.testnet).includes(version.toString('hex'))) {
+    const buf = Buffer.allocUnsafe(4)
+    buf.writeInt32BE(this.networks.testnet.bip32.public, 0)
+    buffer = Buffer.concat([buf, key]) // vpub
+    this.network = this.networks.testnet
     this.isTestnet = true
   }
 
   return b58.encode(buffer)
 }
 
-fromZPub.prototype.getAccountPublic = function () {
+fromZPub.prototype.getAccountPublicKey = function () {
+  let pub = bjs.bip32.fromBase58(this.zpub, this.network).neutered().toBase58()
   let masterPub = this.isTestnet ?
-                    vpub(bjs.bip32.fromBase58(this.zpub, this.network).neutered().toBase58()) :
-                      zpub(bjs.bip32.fromBase58(this.zpub, this.network).neutered().toBase58())
+                    vpub(pub, this.pubTypes.testnet.vpub) :
+                      zpub(pubt , this.pubTypes.mainnet.zpub)
 
   return masterPub
 }
 
 fromZPub.prototype.getPublicKey = function (index, isChange) {
-  isChange = isChange !== true ? false : true
-
-  let change = isChange !== true ? 0 : 1
+  let change = isChange === true ? 1 : 0
     , zpub = bjs.bip32.fromBase58(this.zpub, this.network).derive(change).derive(index)
 
   return zpub.publicKey.toString('hex')
 }
 
 fromZPub.prototype.getAddress = function (index, isChange) {
-  isChange = isChange !== true ? false : true
-
-  let change = isChange !== true ? 0 : 1
+  let change = isChange === true ? 1 : 0
     , pubkey = bjs.bip32.fromBase58(this.zpub, this.network).derive(change).derive(index).publicKey
 
   const payment = bjs.payments.p2wpkh({
@@ -205,36 +212,48 @@ fromZPub.prototype.getAddress = function (index, isChange) {
   return payment.address
 }
 
-function zprv(pub) {
-  let payload = b58.decode(pub)
-    , version = payload.slice(0, 4)
-    , key = payload.slice(4)
+fromZPub.prototype.getPayment = function (index, isChange) {
+  let change = isChange === true ? 1 : 0
+    , pubkey = bjs.bip32.fromBase58(this.zpub, this.network).derive(change).derive(index).publicKey
 
-  return b58.encode(Buffer.concat([Buffer.from('04b2430c','hex'), key]))
+  const payment = bjs.payments.p2wpkh({
+    pubkey: pubkey,
+    network: this.network
+  })
+
+  return payment
 }
 
-function zpub(pub) {
+function zprv(pub, data) {
   let payload = b58.decode(pub)
     , version = payload.slice(0, 4)
     , key = payload.slice(4)
 
-  return b58.encode(Buffer.concat([Buffer.from('04b24746','hex'), key]))
+  return b58.encode(Buffer.concat([Buffer.from(data,'hex'), key]))
 }
 
-function vprv(pub) {
+function zpub(pub, data) {
   let payload = b58.decode(pub)
     , version = payload.slice(0, 4)
     , key = payload.slice(4)
 
-  return b58.encode(Buffer.concat([Buffer.from('045f18bc','hex'), key]))
+  return b58.encode(Buffer.concat([Buffer.from(data,'hex'), key]))
 }
 
-function vpub(pub) {
+function vprv(pub, data) {
   let payload = b58.decode(pub)
     , version = payload.slice(0, 4)
     , key = payload.slice(4)
 
-  return b58.encode(Buffer.concat([Buffer.from('045f1cf6','hex'), key]))
+  return b58.encode(Buffer.concat([Buffer.from(data,'hex'), key]))
+}
+
+function vpub(pub, data) {
+  let payload = b58.decode(pub)
+    , version = payload.slice(0, 4)
+    , key = payload.slice(4)
+
+  return b58.encode(Buffer.concat([Buffer.from(data,'hex'), key]))
 }
 
 module.exports = {

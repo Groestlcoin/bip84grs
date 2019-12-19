@@ -1,6 +1,6 @@
 {
   "name": "bip84grs",
-  "version": "0.1.9",
+  "version": "0.2.2",
   "description": "BIP84 - Derives segwit + bech32 addresses from seed, zprv/zpub and vprv/vpub in javascript",
   "main": "./src/index.js",
   "repository": {
@@ -8,10 +8,13 @@
     "url": "https://github.com/Groestlcoin/bip84grs"
   },
   "scripts": {
-    "test": "node ./test/test.js"
+    "test": "jest"
   },
   "keywords": [
-    "bip84grs"
+    "groestlcoin",
+    "bip84",
+    "bech32",
+    "segwit"
   ],
   "author": "Groestlcoin Developers",
   "license": "ISC",
@@ -19,5 +22,8 @@
     "bip39": "^3.0.1",
     "groestlcoinjs-lib": "https://github.com/Groestlcoin/groestlcoinjs-lib.git",
     "bs58grscheck": "https://github.com/Groestlcoin/bs58grscheck.git"
+  },
+  "devDependencies": {
+    "jest": "^24.9.0"
   }
 }
